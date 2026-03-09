@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#SBATCH -p songmei
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=96G
+#SBATCH -t 6:00:00
+#SBATCH -J gsm8k_gkd
+#SBATCH -o slurm-%j.out
+#SBATCH -e slurm-%j.err
+
+set -euo pipefail
+
+source ~/.bashrc
+conda activate opd
+
+# ------------------------
+# HuggingFace cache → scratch
+# ------------------------
+export HF_HOME=/scratch/users/p.amortila/hf
+export TRANSFORMERS_CACHE=$HF_HOME
+export HF_DATASETS_CACHE=$HF_HOME
+mkdir -p "$HF_HOME"
+
+# ------------------------
+# Disable W&B for now
+# ------------------------
+export WANDB_MODE=disabled
+
+# Prevent tokenizer fork warnings
+export TOKENIZERS_PARALLELISM=false
+
+cd ~/trl/trl/experimental/gkd
+
+# ------------------------
+# Experimental knobs
+# (edit here without touching python file)
+# ------------------------
+export STUDENT_MODEL=Qwen/Qwen2-0.5B-Instruct
+export TEACHER_MODEL=Qwen/Qwen2-1.5B-Instruct
+
+export TRAIN_SAMPLES=2000
+export EVAL_SAMPLES=256
+
+export MAX_STEPS=800
+export BATCH_SIZE=1
+export GRAD_ACCUM=8
+export LR=2e-6
+export BETA=1.0
+export OUTPUT_DIR=gkd_gsm8k_out_beta1
+
+# ------------------------
+# Run experiment
+# ------------------------
+python -u gkd_experiment.py
+
