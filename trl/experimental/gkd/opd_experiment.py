@@ -13,7 +13,8 @@ import matplotlib.pyplot as plt
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from trl.experimental.gkd import GKDConfig, GKDTrainer
+from trl.experimental.gkd import GKDConfig
+from trl.experimental.gkd.opd_trainer import OPDTrainer
 
 
 # -----------------------
@@ -37,12 +38,14 @@ GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "800"))  # set -1 to use epochs instead
 NUM_EPOCHS = float(os.environ.get("NUM_EPOCHS", "1"))  # ignored if MAX_STEPS > 0
 LR = float(os.environ.get("LR", "2e-6"))
+OPD_MODE = os.environ.get("OPD_MODE", "entropy_baseline")  # "expectation" | "stochastic" | "entropy_baseline"
 
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", "100"))
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "200"))
 
 MAX_NEW_TOKENS_EVAL = int(os.environ.get("MAX_NEW_TOKENS_EVAL", "256"))
+FLEXIBLE_EVAL = os.environ.get("FLEXIBLE_EVAL", "0") == "1"  # set to "1" to also accept $num$ format
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -69,19 +72,25 @@ def gsm8k_to_messages(question: str, answer: Optional[str]) -> List[Dict[str, st
 
 
 _ANS_RE = re.compile(r"####\s*([\-]?\d[\d,\.]*)")
+_ANS_RE_DOLLAR = re.compile(r"\$\s*([\-]?\d[\d,\.]*)\s*\$")
 
-def extract_final_answer(text: str) -> Optional[str]:
+def extract_final_answer(text: str, flexible: bool = False) -> Optional[str]:
     """
-    GSM8K official answers are typically in the form:
-      ... reasoning ...
-      #### 42
-    We parse the token after #### and normalize commas/spaces.
+    Parses the final numeric answer from a model response.
+
+    1. GSM8K official format:   #### 42  (always accepted)
+    2. Dollar-wrapped format:   $42$     (only if flexible=True)
+
+    Commas are stripped for normalization (e.g. "1,000" -> "1000").
     """
     m = _ANS_RE.search(text)
-    if not m:
-        return None
-    ans = m.group(1).strip().replace(",", "")
-    return ans
+    if m:
+        return m.group(1).strip().replace(",", "")
+    if flexible:
+        m = _ANS_RE_DOLLAR.search(text)
+        if m:
+            return m.group(1).strip().replace(",", "")
+    return None
 
 
 def build_gsm8k_datasets(train_n: int, eval_n: int) -> Tuple[Dataset, Dataset]:
@@ -121,7 +130,7 @@ def gsm8k_exact_match(
     for i in range(n):
         q = eval_raw[i]["question"]
         gold = eval_raw[i]["answer"]
-        gold_num = extract_final_answer(gold)
+        gold_num = extract_final_answer(gold, flexible=FLEXIBLE_EVAL)
 
         msgs = gsm8k_to_messages(q, answer=None)
 
@@ -142,7 +151,7 @@ def gsm8k_exact_match(
             pad_token_id=tokenizer.eos_token_id,
         )
         gen = tokenizer.decode(out[0], skip_special_tokens=True)
-        pred_num = extract_final_answer(gen)
+        pred_num = extract_final_answer(gen, flexible=FLEXIBLE_EVAL)
 
         is_correct = (pred_num is not None) and (gold_num is not None) and (pred_num == gold_num)
         if pred_num is not None:
@@ -224,6 +233,7 @@ def main() -> None:
     print(f"TEACHER_MODEL={TEACHER_MODEL}")
     print(f"TRAIN_SAMPLES={TRAIN_SAMPLES} EVAL_SAMPLES={EVAL_SAMPLES}")
     print(f"OUTPUT_DIR={OUTPUT_DIR}")
+    print(f"OPD_MODE={OPD_MODE}")
 
     # Load datasets
     train_dataset, eval_dataset = build_gsm8k_datasets(TRAIN_SAMPLES, EVAL_SAMPLES)
@@ -264,9 +274,8 @@ def main() -> None:
         learning_rate=LR,
         logging_steps=LOGGING_STEPS,
         eval_steps=EVAL_STEPS,
-        save_steps=SAVE_STEPS,
         eval_strategy="steps",
-        save_strategy="steps",
+        save_strategy="no",
         do_train=True,
         do_eval=True,
         report_to=["none"],
@@ -280,13 +289,14 @@ def main() -> None:
     else:
         args.num_train_epochs = NUM_EPOCHS
 
-    trainer = GKDTrainer(
+    trainer = OPDTrainer(
         model=model,
         teacher_model=teacher_model,
         args=args,
         processing_class=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        mode=OPD_MODE,
     )
 
     trainer.train()

@@ -44,6 +44,7 @@ EVAL_STEPS = int(os.environ.get("EVAL_STEPS", "100"))
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "200"))
 
 MAX_NEW_TOKENS_EVAL = int(os.environ.get("MAX_NEW_TOKENS_EVAL", "256"))
+FLEXIBLE_EVAL = os.environ.get("FLEXIBLE_EVAL", "0") == "1"  # set to "1" to also accept $num$ format
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -70,19 +71,25 @@ def gsm8k_to_messages(question: str, answer: Optional[str]) -> List[Dict[str, st
 
 
 _ANS_RE = re.compile(r"####\s*([\-]?\d[\d,\.]*)")
+_ANS_RE_DOLLAR = re.compile(r"\$\s*([\-]?\d[\d,\.]*)\s*\$")
 
-def extract_final_answer(text: str) -> Optional[str]:
+def extract_final_answer(text: str, flexible: bool = False) -> Optional[str]:
     """
-    GSM8K official answers are typically in the form:
-      ... reasoning ...
-      #### 42
-    We parse the token after #### and normalize commas/spaces.
+    Parses the final numeric answer from a model response.
+
+    1. GSM8K official format:   #### 42  (always accepted)
+    2. Dollar-wrapped format:   $42$     (only if flexible=True)
+
+    Commas are stripped for normalization (e.g. "1,000" -> "1000").
     """
     m = _ANS_RE.search(text)
-    if not m:
-        return None
-    ans = m.group(1).strip().replace(",", "")
-    return ans
+    if m:
+        return m.group(1).strip().replace(",", "")
+    if flexible:
+        m = _ANS_RE_DOLLAR.search(text)
+        if m:
+            return m.group(1).strip().replace(",", "")
+    return None
 
 
 def build_gsm8k_datasets(train_n: int, eval_n: int) -> Tuple[Dataset, Dataset]:
@@ -122,7 +129,7 @@ def gsm8k_exact_match(
     for i in range(n):
         q = eval_raw[i]["question"]
         gold = eval_raw[i]["answer"]
-        gold_num = extract_final_answer(gold)
+        gold_num = extract_final_answer(gold, flexible=FLEXIBLE_EVAL)
 
         msgs = gsm8k_to_messages(q, answer=None)
 
@@ -143,7 +150,7 @@ def gsm8k_exact_match(
             pad_token_id=tokenizer.eos_token_id,
         )
         gen = tokenizer.decode(out[0], skip_special_tokens=True)
-        pred_num = extract_final_answer(gen)
+        pred_num = extract_final_answer(gen, flexible=FLEXIBLE_EVAL)
 
         is_correct = (pred_num is not None) and (gold_num is not None) and (pred_num == gold_num)
         if pred_num is not None:

@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=96G
 #SBATCH -t 6:00:00
-#SBATCH -J gsm8k_gkd
+#SBATCH -J gsm8k_opd_expectation
 #SBATCH -o slurm-%j.out
 #SBATCH -e slurm-%j.err
 
@@ -33,7 +33,6 @@ cd ~/trl/trl/experimental/gkd
 
 # ------------------------
 # Experimental knobs
-# (edit here without touching python file)
 # ------------------------
 export STUDENT_MODEL=Qwen/Qwen2-0.5B-Instruct
 export TEACHER_MODEL=Qwen/Qwen2-1.5B-Instruct
@@ -45,11 +44,14 @@ export MAX_STEPS=800
 export BATCH_SIZE=1
 export GRAD_ACCUM=8
 export LR=2e-6
-export BETA=1.0
-export OUTPUT_DIR=gkd_gsm8k_out_$(date +%Y%m%d_%H%M%S)
+
+# OPD loss mode: "expectation"
+# Analytical gradient — loss = log pi_e(a_e) - E_{a~pi_s}[log pi_e(a)]
+# No REINFORCE; gradient flows through the full softmax sum (same style as GKD)
+export OPD_MODE=expectation
+export OUTPUT_DIR=opd_gsm8k_out_${OPD_MODE}_$(date +%Y%m%d_%H%M%S)
 
 # ------------------------
 # Run experiment
 # ------------------------
-python -u gkd_experiment.py
-
+python -u opd_experiment.py
