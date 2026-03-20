@@ -39,6 +39,8 @@ MAX_STEPS = int(os.environ.get("MAX_STEPS", "800"))  # set -1 to use epochs inst
 NUM_EPOCHS = float(os.environ.get("NUM_EPOCHS", "1"))  # ignored if MAX_STEPS > 0
 LR = float(os.environ.get("LR", "2e-6"))
 OPD_MODE = os.environ.get("OPD_MODE", "entropy_baseline")  # "expectation" | "stochastic" | "entropy_baseline"
+NUM_INNER_STEPS = int(os.environ.get("NUM_INNER_STEPS", "1"))   # L in Algorithm 4
+REPLAY_BUFFER_SIZE = int(os.environ.get("REPLAY_BUFFER_SIZE", "1"))  # k in Algorithm 4
 
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", "100"))
@@ -234,6 +236,7 @@ def main() -> None:
     print(f"TRAIN_SAMPLES={TRAIN_SAMPLES} EVAL_SAMPLES={EVAL_SAMPLES}")
     print(f"OUTPUT_DIR={OUTPUT_DIR}")
     print(f"OPD_MODE={OPD_MODE}")
+    print(f"NUM_INNER_STEPS={NUM_INNER_STEPS}  REPLAY_BUFFER_SIZE={REPLAY_BUFFER_SIZE}")
 
     # Load datasets
     train_dataset, eval_dataset = build_gsm8k_datasets(TRAIN_SAMPLES, EVAL_SAMPLES)
@@ -278,7 +281,7 @@ def main() -> None:
         save_strategy="no",
         do_train=True,
         do_eval=True,
-        report_to=["none"],
+        report_to=["wandb"],
         bf16=torch.cuda.is_available(),
         lmbda=1.0,
     )
@@ -297,6 +300,8 @@ def main() -> None:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         mode=OPD_MODE,
+        num_inner_steps=NUM_INNER_STEPS,
+        replay_buffer_size=REPLAY_BUFFER_SIZE,
     )
 
     trainer.train()

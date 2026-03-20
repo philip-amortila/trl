@@ -11,14 +11,14 @@ import numpy as np
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 RUNS = {
-    "GKD":               "gkd_gsm8k_out_20260312_231909",
-    "OPD (entropy)":     "opd_gsm8k_out_entropy_baseline_20260312_231909",
-    "OPD (expectation)": "opd_gsm8k_out_expectation_20260312_231909",
+    "OPD softmax":           "opd_gsm8k_out_softmax_20260317_113153",
+    "OPD softmax L10 buf10": "opd_gsm8k_out_softmax_L10_buf10_20260319_163546",
+    "OPD softmax L10 buf100":"opd_gsm8k_out_softmax_L10_buf100_20260319_164428",
 }
 COLORS = {
-    "GKD":               "#1f77b4",
-    "OPD (entropy)":     "#ff7f0e",
-    "OPD (expectation)": "#2ca02c",
+    "OPD softmax":           "#1f77b4",
+    "OPD softmax L10 buf10": "#ff7f0e",
+    "OPD softmax L10 buf100":"#2ca02c",
 }
 
 def load_log(run_dir):
@@ -131,9 +131,9 @@ tbl.set_fontsize(9)
 tbl.scale(1, 1.6)
 ax_table.set_title("Summary (n=1319)", pad=12)
 
-fig.suptitle("GKD vs OPD on GSM8K  —  Qwen2-0.5B student, Qwen2-1.5B teacher", fontsize=13)
+fig.suptitle("OPD softmax variants on GSM8K  —  Qwen2-0.5B student, Qwen2-1.5B teacher", fontsize=13)
 
-out = os.path.join(BASE, "results_summary.png")
+out = os.path.join(BASE, "results_summary_softmax.png")
 plt.savefig(out, dpi=150, bbox_inches="tight")
 print(f"Saved: {out}")
 
