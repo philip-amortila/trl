@@ -249,6 +249,12 @@ class GKDTrainer(SFTTrainer):
         student_logits = student_logits / temperature
         teacher_logits = teacher_logits / temperature
 
+        # Truncate to the smaller vocabulary (handles embedding-padding differences
+        # across model families; shared real tokens are always in the same positions).
+        min_vocab = min(student_logits.size(-1), teacher_logits.size(-1))
+        student_logits = student_logits[..., :min_vocab]
+        teacher_logits = teacher_logits[..., :min_vocab]
+
         # Compute log probabilities for student and probabilities for teacher
         student_log_probs = F.log_softmax(student_logits, dim=-1)
         teacher_log_probs = F.log_softmax(teacher_logits, dim=-1)

@@ -29,8 +29,6 @@ DATASET_CONFIG = os.environ.get("DATASET_CONFIG", "main")
 TRAIN_SAMPLES = int(os.environ.get("TRAIN_SAMPLES", "2000"))
 EVAL_SAMPLES = int(os.environ.get("EVAL_SAMPLES", "256"))
 
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "gkd_gsm8k_out")
-
 # Training knobs
 PER_DEVICE_BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "1"))
 GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))
@@ -38,6 +36,20 @@ MAX_STEPS = int(os.environ.get("MAX_STEPS", "800"))  # set -1 to use epochs inst
 NUM_EPOCHS = float(os.environ.get("NUM_EPOCHS", "1"))  # ignored if MAX_STEPS > 0
 LR = float(os.environ.get("LR", "2e-6"))
 BETA = float(os.environ.get("BETA", "0.5"))
+
+
+def _short_name(model_id: str) -> str:
+    """Extract the repo name part from a HuggingFace model ID."""
+    return model_id.split("/")[-1]
+
+
+_default_output_dir = (
+    f"gkd_gsm8k"
+    f"_S-{_short_name(STUDENT_MODEL)}"
+    f"_T-{_short_name(TEACHER_MODEL)}"
+    f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
+)
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", _default_output_dir)
 
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", "100"))
@@ -232,6 +244,26 @@ def main() -> None:
     print(f"TEACHER_MODEL={TEACHER_MODEL}")
     print(f"TRAIN_SAMPLES={TRAIN_SAMPLES} EVAL_SAMPLES={EVAL_SAMPLES}")
     print(f"OUTPUT_DIR={OUTPUT_DIR}")
+
+    # Save run config so results are always self-describing
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    run_config = {
+        "method": "gkd",
+        "student_model": STUDENT_MODEL,
+        "teacher_model": TEACHER_MODEL,
+        "dataset": f"{DATASET_NAME}/{DATASET_CONFIG}",
+        "train_samples": TRAIN_SAMPLES,
+        "eval_samples": EVAL_SAMPLES,
+        "beta": BETA,
+        "max_steps": MAX_STEPS,
+        "num_epochs": NUM_EPOCHS,
+        "lr": LR,
+        "batch_size": PER_DEVICE_BATCH_SIZE,
+        "grad_accum": GRAD_ACCUM,
+        "output_dir": OUTPUT_DIR,
+    }
+    with open(os.path.join(OUTPUT_DIR, "run_config.json"), "w") as f:
+        json.dump(run_config, f, indent=2)
 
     # Load datasets
     train_dataset, eval_dataset = build_gsm8k_datasets(TRAIN_SAMPLES, EVAL_SAMPLES)
