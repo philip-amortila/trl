@@ -39,6 +39,8 @@ LR = float(os.environ.get("LR", "2e-6"))
 OPD_MODE = os.environ.get("OPD_MODE", "entropy_baseline")  # "expectation" | "stochastic" | "entropy_baseline"
 NUM_INNER_STEPS = int(os.environ.get("NUM_INNER_STEPS", "1"))   # L in Algorithm 4
 REPLAY_BUFFER_SIZE = int(os.environ.get("REPLAY_BUFFER_SIZE", "1"))  # k in Algorithm 4
+TRUST_REGION = os.environ.get("TRUST_REGION", "0") == "1"  # PPO-style clipped surrogate
+PPO_CLIP_EPS = float(os.environ.get("PPO_CLIP_EPS", "0.2"))
 
 
 def _short_name(model_id: str) -> str:
@@ -52,6 +54,7 @@ _default_output_dir = (
     f"_S-{_short_name(STUDENT_MODEL)}"
     f"_T-{_short_name(TEACHER_MODEL)}"
     f"_{OPD_MODE}"
+    f"{'_tr' if TRUST_REGION else ''}"
     f"_L{NUM_INNER_STEPS}"
     f"_buf{REPLAY_BUFFER_SIZE}"
     f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -252,6 +255,7 @@ def main() -> None:
     print(f"TRAIN_SAMPLES={TRAIN_SAMPLES} EVAL_SAMPLES={EVAL_SAMPLES}")
     print(f"OUTPUT_DIR={OUTPUT_DIR}")
     print(f"OPD_MODE={OPD_MODE}")
+    print(f"TRUST_REGION={TRUST_REGION}  PPO_CLIP_EPS={PPO_CLIP_EPS}")
     print(f"NUM_INNER_STEPS={NUM_INNER_STEPS}  REPLAY_BUFFER_SIZE={REPLAY_BUFFER_SIZE}")
 
     # Save run config so results are always self-describing
@@ -263,6 +267,8 @@ def main() -> None:
         "train_samples": TRAIN_SAMPLES,
         "eval_samples": EVAL_SAMPLES,
         "opd_mode": OPD_MODE,
+        "trust_region": TRUST_REGION,
+        "ppo_clip_eps": PPO_CLIP_EPS,
         "num_inner_steps": NUM_INNER_STEPS,
         "replay_buffer_size": REPLAY_BUFFER_SIZE,
         "max_steps": MAX_STEPS,
@@ -339,6 +345,8 @@ def main() -> None:
         mode=OPD_MODE,
         num_inner_steps=NUM_INNER_STEPS,
         replay_buffer_size=REPLAY_BUFFER_SIZE,
+        trust_region=TRUST_REGION,
+        ppo_clip_eps=PPO_CLIP_EPS,
     )
 
     trainer.train()

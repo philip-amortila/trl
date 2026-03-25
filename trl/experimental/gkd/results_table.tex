@@ -1,0 +1,16 @@
+\begin{table}[h]
+\centering
+\caption{GSM8K accuracy (exact\_match\_flex \%) for student Qwen2-0.5B-Instruct
+         distilled from Qwen2-1.5B-Instruct.}
+\label{tab:gsm8k_results}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Algorithm} & \textbf{No Trust Region} & \textbf{Trust Region} \\
+\midrule
+GKD & 21.8 & --- \\
+OPD-Softmax & 39.6 & 40.6 \\
+OPD-Entropy & 39.0 & 40.3 \\
+OPD-Expectation & 40.6 & 40.6 \\
+\bottomrule
+\end{tabular}
+\end{table}

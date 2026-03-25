@@ -38,6 +38,11 @@ class OPDTrainer(GKDTrainer):
     • Net effect: the gradient pushes π_s to put more mass on tokens that the
       teacher scores highly.
 
+    When ``trust_region=True``, the analytical update is replaced by a
+    REINFORCE estimator (using the teacher sample as baseline and the student's
+    on-policy token as the action) wrapped in the PPO clipped surrogate, making
+    the trust-region mechanism consistent across all three REINFORCE modes.
+
     ─────────────────────────────────────────────────────────────────
     Mode 2 – "stochastic"  (mode="stochastic")
     ─────────────────────────────────────────────────────────────────
@@ -127,6 +132,32 @@ class OPDTrainer(GKDTrainer):
         loss = -((expert_probs - student_probs_fixed) * student_logits).sum(-1)
         #      maximises  E_{π_E}[Q_θ] − E_{π_θ}[Q_θ]  analytically,
         #      using the full teacher distribution instead of a single a_E sample.
+
+    ─────────────────────────────────────────────────────────────────
+    Trust-region option  (trust_region=True)
+    ─────────────────────────────────────────────────────────────────
+    Applies to modes "expectation", "stochastic", and "entropy_baseline".
+
+    Replaces the plain REINFORCE gradient carrier  advantage · ∇ log π_s(a_{s,i})
+    with the PPO clipped surrogate:
+
+        r_i = π_s_new(a_{s,i}) / π_s_old(a_{s,i})
+            = exp( log π_s_new(a_{s,i}) − log π_s_old(a_{s,i}) )
+
+        loss_i = max( r_i · adv_i,  clip(r_i, 1−ε, 1+ε) · adv_i )
+
+    Note on sign convention: the code minimises  advantage · log π_s  where
+    advantage > 0 means "student token is *worse* than the baseline → decrease
+    its probability".  The PPO pessimistic bound in this convention is
+    torch.max (not torch.min) of the clipped and unclipped objectives.
+
+    The behaviour-policy log-probs  log π_s_old(a_{s,i})  are recorded with a
+    no-grad forward pass immediately after trajectory collection (before any
+    inner gradient steps) and stored in the replay buffer so they remain fixed
+    across all ``num_inner_steps`` inner updates.
+
+    ``trust_region`` is ignored for mode="softmax" (which does not use
+    REINFORCE).
     """
 
     def __init__(
@@ -135,6 +166,8 @@ class OPDTrainer(GKDTrainer):
         mode: str = "expectation",
         num_inner_steps: int = 1,
         replay_buffer_size: int = 1,
+        trust_region: bool = False,
+        ppo_clip_eps: float = 0.2,
         **kwargs,
     ):
         """
@@ -147,6 +180,13 @@ class OPDTrainer(GKDTrainer):
             replay_buffer_size: Maximum number of past batches kept in the replay
                   buffer (rounds ``1 … k`` in Algorithm 4).  Default ``1`` uses
                   only the current batch (no replay from older policies).
+            trust_region: If ``True``, replaces the plain REINFORCE update with a
+                  PPO-style clipped surrogate objective for modes "expectation",
+                  "stochastic", and "entropy_baseline".  An extra no-grad forward
+                  pass is performed at data-collection time to record the
+                  behaviour-policy log-probabilities.  Ignored for mode="softmax".
+            ppo_clip_eps: Clipping radius ε for the PPO importance-ratio.  Only
+                  used when ``trust_region=True``.  Default ``0.2``.
         """
         valid_modes = {"expectation", "stochastic", "entropy_baseline", "softmax"}
         if mode not in valid_modes:
@@ -154,6 +194,8 @@ class OPDTrainer(GKDTrainer):
         super().__init__(*args, **kwargs)
         self.mode = mode
         self.num_inner_steps = num_inner_steps
+        self.trust_region = trust_region
+        self.ppo_clip_eps = ppo_clip_eps
         # CPU-side ring buffer of past batches (prompt + student trajectory).
         self._replay_buffer: deque[dict] = deque(maxlen=max(replay_buffer_size, 1))
 
@@ -221,7 +263,27 @@ class OPDTrainer(GKDTrainer):
             inputs["attention_mask"] = new_mask
             inputs["labels"] = new_labels
 
-        # ── 2. Store freshly collected batch (round k data) ───────────────────
+        # ── 2a. Record behaviour-policy log-probs for PPO trust region ──────
+        if self.trust_region and self.mode != "softmax":
+            with torch.no_grad():
+                old_out = model(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                )
+            prompt_lengths = inputs["prompts"].shape[1]
+            # Align with the shifted logits used in compute_loss / opd_loss
+            old_logits = old_out.logits[:, prompt_lengths - 1 : -1, :] / self.temperature
+            old_lp = F.log_softmax(old_logits, dim=-1)  # (B, T', V)
+
+            shifted_labels = inputs["labels"][:, prompt_lengths:]  # (B, T')
+            sa = shifted_labels.clone()
+            sa[sa == -100] = 0
+            old_log_probs = old_lp.gather(-1, sa.unsqueeze(-1)).squeeze(-1)  # (B, T')
+            # Zero padded positions so they never affect the ratio
+            old_log_probs[shifted_labels == -100] = 0.0
+            inputs["old_log_probs"] = old_log_probs
+
+        # ── 2b. Store freshly collected batch (round k data) ──────────────────
         self._push_to_replay_buffer(inputs)
 
         # ── 3. L inner gradient steps over the accumulated replay buffer ──────
@@ -249,7 +311,15 @@ class OPDTrainer(GKDTrainer):
 
     @staticmethod
     def opd_loss(
-        student_logits, teacher_logits, labels=None, temperature=1.0, mode="expectation", reduction="batchmean"
+        student_logits,
+        teacher_logits,
+        labels=None,
+        temperature=1.0,
+        mode="expectation",
+        reduction="batchmean",
+        trust_region=False,
+        ppo_clip_eps=0.2,
+        old_log_probs=None,
     ):
         """
         Compute the OPD loss for a single batch.
@@ -263,6 +333,16 @@ class OPDTrainer(GKDTrainer):
             mode:           "expectation" | "stochastic" | "entropy_baseline"
                             (see class docstring for details)
             reduction:      "batchmean" | "sum" | "mean" | "none"
+            trust_region:   If ``True``, replace the REINFORCE gradient with a
+                            PPO clipped surrogate for modes "expectation",
+                            "stochastic", and "entropy_baseline".  Ignored for
+                            mode="softmax".
+            ppo_clip_eps:   Clipping radius ε for the PPO importance-ratio
+                            (only used when ``trust_region=True``).
+            old_log_probs:  (B, T) per-token log-probs of the *behaviour* policy
+                            (i.e. the student at data-collection time), aligned
+                            with ``labels``.  Required when ``trust_region=True``;
+                            falls back to plain REINFORCE when ``None``.
 
         Returns:
             Scalar loss (or per-token tensor when reduction="none").
@@ -290,10 +370,29 @@ class OPDTrainer(GKDTrainer):
             # log π_e(a_{e,i} | x_i)  — teacher constant, acts as baseline
             log_pi_e_expert = teacher_log_probs.gather(-1, expert_actions.unsqueeze(-1)).squeeze(-1)
 
-            # Exact expectation  E_{a~π_s}[log π_e(a | x_i)]  — gradient flows analytically
-            expected_log_pi_e = (student_log_probs.exp() * teacher_log_probs).sum(-1)  # (B, T)
+            if trust_region and old_log_probs is not None:
+                # PPO path: switch to REINFORCE on student tokens so we can form
+                # a proper importance ratio, using the teacher sample as baseline.
+                student_actions = labels.clone()
+                student_actions[student_actions == -100] = 0
 
-            loss = log_pi_e_expert - expected_log_pi_e
+                log_pi_e_student = teacher_log_probs.gather(
+                    -1, student_actions.unsqueeze(-1)
+                ).squeeze(-1)  # (B, T)
+
+                log_pi_s_student = student_log_probs.gather(
+                    -1, student_actions.unsqueeze(-1)
+                ).squeeze(-1)  # (B, T)
+
+                advantage = (log_pi_e_expert - log_pi_e_student).detach()
+                ratio = (log_pi_s_student - old_log_probs).exp()
+                clipped_ratio = ratio.clamp(1.0 - ppo_clip_eps, 1.0 + ppo_clip_eps)
+                # Sign convention: advantage > 0 → decrease prob → minimise max(...)
+                loss = torch.max(ratio * advantage, clipped_ratio * advantage)
+            else:
+                # Exact expectation  E_{a~π_s}[log π_e(a | x_i)]  — gradient flows analytically
+                expected_log_pi_e = (student_log_probs.exp() * teacher_log_probs).sum(-1)  # (B, T)
+                loss = log_pi_e_expert - expected_log_pi_e
 
         elif mode == "stochastic":
             # ── Mode 2: REINFORCE with Monte Carlo teacher baseline ───────────
@@ -321,9 +420,16 @@ class OPDTrainer(GKDTrainer):
                 -1, student_actions.unsqueeze(-1)
             ).squeeze(-1)  # (B, T)
 
-            # REINFORCE: treat advantage as a fixed scalar reward
+            # Advantage is the same regardless of trust_region
             advantage = (log_pi_e_expert - log_pi_e_student).detach()
-            loss = advantage * log_pi_s_student
+
+            if trust_region and old_log_probs is not None:
+                ratio = (log_pi_s_student - old_log_probs).exp()
+                clipped_ratio = ratio.clamp(1.0 - ppo_clip_eps, 1.0 + ppo_clip_eps)
+                loss = torch.max(ratio * advantage, clipped_ratio * advantage)
+            else:
+                # Plain REINFORCE: treat advantage as a fixed scalar reward
+                loss = advantage * log_pi_s_student
 
         elif mode == "entropy_baseline":
             # ── Mode 3: REINFORCE with exact teacher-entropy baseline ─────────
@@ -348,10 +454,16 @@ class OPDTrainer(GKDTrainer):
                 -1, student_actions.unsqueeze(-1)
             ).squeeze(-1)  # (B, T)
 
-            # REINFORCE: advantage = (exact baseline) - (per-token reward)
-            # = -H(π_e) - log π_e(a_{s,i})
+            # Advantage = (exact baseline) - (per-token reward) = -H(π_e) - log π_e(a_{s,i})
             advantage = (neg_teacher_entropy - log_pi_e_student).detach()
-            loss = advantage * log_pi_s_student
+
+            if trust_region and old_log_probs is not None:
+                ratio = (log_pi_s_student - old_log_probs).exp()
+                clipped_ratio = ratio.clamp(1.0 - ppo_clip_eps, 1.0 + ppo_clip_eps)
+                loss = torch.max(ratio * advantage, clipped_ratio * advantage)
+            else:
+                # Plain REINFORCE
+                loss = advantage * log_pi_s_student
 
         elif mode == "softmax":
             # ── Mode 4: Algorithm 4 softmax – Q-function maximization ────────
@@ -407,12 +519,18 @@ class OPDTrainer(GKDTrainer):
         shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :]
         shifted_labels = inputs["labels"][:, prompt_lengths:]
 
+        # Retrieve behaviour-policy log-probs stored at collection time (PPO).
+        old_log_probs = inputs.get("old_log_probs", None)
+
         loss = self.opd_loss(
             student_logits=shifted_student_logits,
             teacher_logits=shifted_teacher_logits,
             labels=shifted_labels,
             temperature=self.temperature,
             mode=self.mode,
+            trust_region=self.trust_region,
+            ppo_clip_eps=self.ppo_clip_eps,
+            old_log_probs=old_log_probs,
         )
 
         empty_cache()
