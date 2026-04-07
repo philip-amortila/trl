@@ -1,0 +1,17 @@
+# Slurm logs
+slurm-*.out
+slurm-*.err
+
+# Training output directories
+gkd_gsm8k_out_*/
+opd_gsm8k_out_*/
+
+# Eval output directories
+eval_*/
+
+# Model checkpoints
+gkd-model/
+
+# Python
+__pycache__/
+*.pyc
