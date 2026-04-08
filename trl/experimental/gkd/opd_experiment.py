@@ -41,6 +41,9 @@ NUM_INNER_STEPS = int(os.environ.get("NUM_INNER_STEPS", "1"))   # L in Algorithm
 REPLAY_BUFFER_SIZE = int(os.environ.get("REPLAY_BUFFER_SIZE", "1"))  # k in Algorithm 4
 TRUST_REGION = os.environ.get("TRUST_REGION", "0") == "1"  # PPO-style clipped surrogate
 PPO_CLIP_EPS = float(os.environ.get("PPO_CLIP_EPS", "0.2"))
+USE_CORRECTION = os.environ.get("USE_CORRECTION", "0") == "1"  # Algorithm 8 ζ correction
+CORRECTION_ALPHA = float(os.environ.get("CORRECTION_ALPHA", "0.2"))
+CORRECTION_LR = float(os.environ.get("CORRECTION_LR", "1e-3"))
 
 
 def _short_name(model_id: str) -> str:
@@ -55,6 +58,7 @@ _default_output_dir = (
     f"_T-{_short_name(TEACHER_MODEL)}"
     f"_{OPD_MODE}"
     f"{'_tr' if TRUST_REGION else ''}"
+    f"{'_corr' if USE_CORRECTION else ''}"
     f"_L{NUM_INNER_STEPS}"
     f"_buf{REPLAY_BUFFER_SIZE}"
     f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -257,6 +261,7 @@ def main() -> None:
     print(f"OPD_MODE={OPD_MODE}")
     print(f"TRUST_REGION={TRUST_REGION}  PPO_CLIP_EPS={PPO_CLIP_EPS}")
     print(f"NUM_INNER_STEPS={NUM_INNER_STEPS}  REPLAY_BUFFER_SIZE={REPLAY_BUFFER_SIZE}")
+    print(f"USE_CORRECTION={USE_CORRECTION}  CORRECTION_ALPHA={CORRECTION_ALPHA}  CORRECTION_LR={CORRECTION_LR}")
 
     # Save run config so results are always self-describing
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -269,6 +274,9 @@ def main() -> None:
         "opd_mode": OPD_MODE,
         "trust_region": TRUST_REGION,
         "ppo_clip_eps": PPO_CLIP_EPS,
+        "use_correction": USE_CORRECTION,
+        "correction_alpha": CORRECTION_ALPHA,
+        "correction_lr": CORRECTION_LR,
         "num_inner_steps": NUM_INNER_STEPS,
         "replay_buffer_size": REPLAY_BUFFER_SIZE,
         "max_steps": MAX_STEPS,
@@ -347,6 +355,9 @@ def main() -> None:
         replay_buffer_size=REPLAY_BUFFER_SIZE,
         trust_region=TRUST_REGION,
         ppo_clip_eps=PPO_CLIP_EPS,
+        use_correction=USE_CORRECTION,
+        correction_alpha=CORRECTION_ALPHA,
+        correction_lr=CORRECTION_LR,
     )
 
     trainer.train()

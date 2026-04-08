@@ -2,11 +2,35 @@ import random as _random
 from collections import deque
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from ...models.utils import unwrap_model_for_generation
 from ..utils import empty_cache
 from .gkd_trainer import GKDTrainer
+
+
+class CorrectionNetwork(nn.Module):
+    """
+    Learnable correction ζ: maps student hidden states to per-token Q-corrections.
+
+    Architecture: a single linear projection (hidden_size → vocab_size), initialised
+    with zero weights so training starts with no correction applied.
+    """
+
+    def __init__(self, hidden_size: int, vocab_size: int):
+        super().__init__()
+        self.linear = nn.Linear(hidden_size, vocab_size, bias=False)
+        nn.init.zeros_(self.linear.weight)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            hidden_states: (B, T, hidden_size)
+        Returns:
+            zeta: (B, T, vocab_size)
+        """
+        return self.linear(hidden_states)
 
 
 class OPDTrainer(GKDTrainer):
@@ -168,6 +192,9 @@ class OPDTrainer(GKDTrainer):
         replay_buffer_size: int = 1,
         trust_region: bool = False,
         ppo_clip_eps: float = 0.2,
+        use_correction: bool = False,
+        correction_alpha: float = 0.2,
+        correction_lr: float = 1e-3,
         **kwargs,
     ):
         """
@@ -187,6 +214,12 @@ class OPDTrainer(GKDTrainer):
                   behaviour-policy log-probabilities.  Ignored for mode="softmax".
             ppo_clip_eps: Clipping radius ε for the PPO importance-ratio.  Only
                   used when ``trust_region=True``.  Default ``0.2``.
+            use_correction: If ``True``, learns a correction network ζ (Algorithm 8)
+                  that refines the teacher Q-function before each PPO step.  A
+                  separate Adam optimizer is maintained for ζ.
+            correction_alpha: Mixing coefficient α in Q̃E = (1−α)·QE + α·ζ.
+                  Default ``0.2``.
+            correction_lr: Learning rate for the ζ Adam optimizer.  Default ``1e-3``.
         """
         valid_modes = {"expectation", "stochastic", "entropy_baseline", "softmax"}
         if mode not in valid_modes:
@@ -198,6 +231,75 @@ class OPDTrainer(GKDTrainer):
         self.ppo_clip_eps = ppo_clip_eps
         # CPU-side ring buffer of past batches (prompt + student trajectory).
         self._replay_buffer: deque[dict] = deque(maxlen=max(replay_buffer_size, 1))
+
+        # ── Algorithm 8: learnable correction ζ ──────────────────────────────
+        self.use_correction = use_correction
+        self.correction_alpha = correction_alpha
+        if use_correction:
+            hidden_size = self.model.config.hidden_size
+            vocab_size = self.model.config.vocab_size
+            device = next(self.model.parameters()).device
+            self.correction_network = CorrectionNetwork(hidden_size, vocab_size).to(device)
+            self.correction_optimizer = torch.optim.Adam(
+                self.correction_network.parameters(), lr=correction_lr
+            )
+
+    # ── Algorithm 8: ζ correction update ────────────────────────────────────
+
+    def _update_correction(self, model, inputs: dict) -> None:
+        """
+        Perform one gradient step on ζ maximizing (Algorithm 8):
+
+            max_ζ  Σ_{X∈D} Σ_{a∈A} ζ(X, a) · (softmax(QE(X, a)) − π_θ(a|X))
+
+        Both θ (student) and teacher parameters are frozen during this step;
+        only the correction network ζ is updated.
+        """
+        prompt_lengths = inputs["prompts"].shape[1]
+        shifted_labels = inputs["labels"][:, prompt_lengths:]  # (B, T')
+        mask = shifted_labels != -100
+        if not mask.any():
+            return
+
+        # Forward student (no grad for θ) – need hidden states for ζ
+        model.eval()
+        with torch.no_grad():
+            student_out = model(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                output_hidden_states=True,
+            )
+            teacher_out = self.teacher_model(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+            )
+        model.train()
+
+        # Slice to the response tokens (mirroring compute_loss alignment)
+        hidden = student_out.hidden_states[-1][:, prompt_lengths - 1 : -1, :]  # (B, T', H)
+        student_logits = student_out.logits[:, prompt_lengths - 1 : -1, :] / self.temperature
+        teacher_logits = teacher_out.logits[:, prompt_lengths - 1 : -1, :] / self.temperature
+
+        min_vocab = min(student_logits.size(-1), teacher_logits.size(-1))
+        student_logits = student_logits[..., :min_vocab]
+        teacher_logits = teacher_logits[..., :min_vocab]
+
+        # Probabilities are detached: ζ gradient must not flow back into θ or teacher
+        teacher_probs = F.softmax(teacher_logits, dim=-1).detach()  # (B, T', V)
+        student_probs = F.softmax(student_logits, dim=-1).detach()  # (B, T', V)
+        diff = teacher_probs - student_probs                         # (B, T', V)
+
+        # ζ forward (grad flows through correction_network only)
+        zeta = self.correction_network(hidden.detach())  # (B, T', vocab_size)
+        zeta = zeta[..., :min_vocab]
+
+        # Objective: maximize Σ_{X,a} ζ(X,a)·diff(X,a)  →  minimise negative mean
+        obj = (zeta * diff).sum(-1)   # (B, T')
+        loss_zeta = -obj[mask].mean()
+
+        self.correction_optimizer.zero_grad()
+        loss_zeta.backward()
+        self.correction_optimizer.step()
 
     # ── Replay buffer helpers ─────────────────────────────────────────────────
 
@@ -283,7 +385,11 @@ class OPDTrainer(GKDTrainer):
             old_log_probs[shifted_labels == -100] = 0.0
             inputs["old_log_probs"] = old_log_probs
 
-        # ── 2b. Store freshly collected batch (round k data) ──────────────────
+        # ── 2b. Update ζ correction network (Algorithm 8) ────────────────────
+        if self.use_correction:
+            self._update_correction(model, inputs)
+
+        # ── 2c. Store freshly collected batch (round k data) ──────────────────
         self._push_to_replay_buffer(inputs)
 
         # ── 3. L inner gradient steps over the accumulated replay buffer ──────
@@ -505,6 +611,7 @@ class OPDTrainer(GKDTrainer):
         student_outputs = model(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
+            output_hidden_states=self.use_correction,
         )
 
         self.teacher_model.eval()
@@ -518,6 +625,23 @@ class OPDTrainer(GKDTrainer):
         shifted_student_logits = student_outputs.logits[:, prompt_lengths - 1 : -1, :]
         shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :]
         shifted_labels = inputs["labels"][:, prompt_lengths:]
+
+        # ── Algorithm 8: apply ζ correction to teacher Q-function ────────────
+        if self.use_correction:
+            # Hidden state of the last transformer layer, aligned with response tokens.
+            hidden = student_outputs.hidden_states[-1][:, prompt_lengths - 1 : -1, :]
+            # ζ is frozen here (PPO step should not update ζ parameters).
+            with torch.no_grad():
+                zeta = self.correction_network(hidden)  # (B, T', vocab_size)
+
+            min_vocab = min(shifted_student_logits.size(-1), shifted_teacher_logits.size(-1))
+            zeta = zeta[..., :min_vocab]
+            # Q̃E = (1 − α)·QE + α·ζ
+            shifted_teacher_logits = (
+                (1 - self.correction_alpha) * shifted_teacher_logits[..., :min_vocab]
+                + self.correction_alpha * zeta
+            )
+            shifted_student_logits = shifted_student_logits[..., :min_vocab]
 
         # Retrieve behaviour-policy log-probs stored at collection time (PPO).
         old_log_probs = inputs.get("old_log_probs", None)
