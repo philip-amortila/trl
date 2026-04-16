@@ -10,11 +10,11 @@ Three sessions per mode run on separate GPUs:
 
   corr_expectation_0     GPU 1  →  expectation  use_correction=False  trust_region=False
   corr_expectation_1     GPU 1  →  expectation  use_correction=True   trust_region=False
-  corr_expectation_tr1   GPU 4  →  expectation  use_correction=True   trust_region=True
+  corr_expectation_tr1   GPU 3  →  expectation  use_correction=True   trust_region=True
 
   corr_stochastic_0     GPU 2  →  stochastic  use_correction=False  trust_region=False
   corr_stochastic_1     GPU 2  →  stochastic  use_correction=True   trust_region=False
-  corr_stochastic_tr1   GPU 5  →  stochastic  use_correction=True   trust_region=True
+  corr_stochastic_tr1   GPU 3  →  stochastic  use_correction=True   trust_region=True
 
 Teacher : Qwen/Qwen2-1.5B-Instruct
 Student : Qwen/Qwen2-0.5B-Instruct
