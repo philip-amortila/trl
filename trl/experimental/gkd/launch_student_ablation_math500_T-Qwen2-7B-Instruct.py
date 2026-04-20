@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Launch GKD vs OPD-expectation+TR comparison across 3 student sizes.
+Launch GKD vs OPD-expectation+TR comparison across 3 student sizes on MATH500.
 
-  opd_s05  GPU 0  →  opd expectation  trust_region=True  student=Qwen2-0.5B
-  opd_s15  GPU 1  →  opd expectation  trust_region=True  student=Qwen2-1.5B
-  opd_s3b  GPU 2  →  opd expectation  trust_region=True  student=Qwen2.5-3B
-  gkd_s05  GPU 3  →  gkd              student=Qwen2-0.5B
-  gkd_s15  GPU 4  →  gkd              student=Qwen2-1.5B
-  gkd_s3b  GPU 5  →  gkd              student=Qwen2.5-3B
+  opd_m_s05  GPU 0  →  opd expectation  trust_region=True  student=Qwen2-0.5B
+  opd_m_s15  GPU 1  →  opd expectation  trust_region=True  student=Qwen2-1.5B
+  opd_m_s3b  GPU 2  →  opd expectation  trust_region=True  student=Qwen2.5-3B
+  gkd_m_s05  GPU 3  →  gkd              student=Qwen2-0.5B
+  gkd_m_s15  GPU 4  →  gkd              student=Qwen2-1.5B
+  gkd_m_s3b  GPU 5  →  gkd              student=Qwen2.5-3B
 
-Teacher : Qwen/Qwen2-7B-Instruct
+Teacher  : Qwen/Qwen2-7B-Instruct
+Train    : lighteval/MATH (train split)
+Eval     : HuggingFaceH4/MATH-500 (test split)
 """
 
 import subprocess
@@ -21,28 +23,28 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 # (session, script)
 SESSIONS = [
     (
-        "opd_s05",
-        "run_gsm8k_opd_expectation_S-Qwen2-0.5B-Instruct_T-Qwen2-7B-Instruct_tr1.sh",
+        "opd_m_s05",
+        "run_math500_opd_expectation_S-Qwen2-0.5B-Instruct_T-Qwen2-7B-Instruct_tr1.sh",
     ),
     (
-        "opd_s15",
-        "run_gsm8k_opd_expectation_S-Qwen2-1.5B-Instruct_T-Qwen2-7B-Instruct_tr1.sh",
+        "opd_m_s15",
+        "run_math500_opd_expectation_S-Qwen2-1.5B-Instruct_T-Qwen2-7B-Instruct_tr1.sh",
     ),
     (
-        "opd_s3b",
-        "run_gsm8k_opd_expectation_S-Qwen2.5-3B-Instruct_T-Qwen2-7B-Instruct_tr1.sh",
+        "opd_m_s3b",
+        "run_math500_opd_expectation_S-Qwen2.5-3B-Instruct_T-Qwen2-7B-Instruct_tr1.sh",
     ),
     (
-        "gkd_s05",
-        "run_gsm8k_gkd_S-Qwen2-0.5B-Instruct_T-Qwen2-7B-Instruct.sh",
+        "gkd_m_s05",
+        "run_math500_gkd_S-Qwen2-0.5B-Instruct_T-Qwen2-7B-Instruct.sh",
     ),
     (
-        "gkd_s15",
-        "run_gsm8k_gkd_S-Qwen2-1.5B-Instruct_T-Qwen2-7B-Instruct.sh",
+        "gkd_m_s15",
+        "run_math500_gkd_S-Qwen2-1.5B-Instruct_T-Qwen2-7B-Instruct.sh",
     ),
     (
-        "gkd_s3b",
-        "run_gsm8k_gkd_S-Qwen2.5-3B-Instruct_T-Qwen2-7B-Instruct.sh",
+        "gkd_m_s3b",
+        "run_math500_gkd_S-Qwen2.5-3B-Instruct_T-Qwen2-7B-Instruct.sh",
     ),
 ]
 
