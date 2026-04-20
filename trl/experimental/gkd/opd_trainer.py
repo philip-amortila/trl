@@ -278,7 +278,7 @@ class OPDTrainer(GKDTrainer):
         # Slice to the response tokens (mirroring compute_loss alignment)
         hidden = student_out.hidden_states[-1][:, prompt_lengths - 1 : -1, :]  # (B, T', H)
         student_logits = student_out.logits[:, prompt_lengths - 1 : -1, :] / self.temperature
-        teacher_logits = teacher_out.logits[:, prompt_lengths - 1 : -1, :] / self.temperature
+        teacher_logits = teacher_out.logits[:, prompt_lengths - 1 : -1, :].to(student_logits.device) / self.temperature
 
         min_vocab = min(student_logits.size(-1), teacher_logits.size(-1))
         student_logits = student_logits[..., :min_vocab]
@@ -623,7 +623,8 @@ class OPDTrainer(GKDTrainer):
 
         prompt_lengths = inputs["prompts"].shape[1]
         shifted_student_logits = student_outputs.logits[:, prompt_lengths - 1 : -1, :]
-        shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :]
+        # move teacher logits to the student's device so the loss and its backward stay there
+        shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :].to(shifted_student_logits.device)
         shifted_labels = inputs["labels"][:, prompt_lengths:]
 
         # ── Algorithm 8: apply ζ correction to teacher Q-function ────────────

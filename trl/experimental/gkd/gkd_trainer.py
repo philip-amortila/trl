@@ -329,7 +329,8 @@ class GKDTrainer(SFTTrainer):
 
             # hidden states (shifted)
             student_hidden = student_outputs.last_hidden_state[:, :-1]
-            teacher_hidden = teacher_outputs.last_hidden_state[:, :-1]
+            # move teacher hidden to student's device so the fused kernel runs there
+            teacher_hidden = teacher_outputs.last_hidden_state[:, :-1].to(student_hidden.device)
 
             # Release full outputs to free memory
             del student_outputs, teacher_outputs
@@ -344,19 +345,24 @@ class GKDTrainer(SFTTrainer):
             # Release intermediate tensors
             del labels_mask, masked_input_ids
 
-            # heads
+            # heads — move teacher head weights to student's device for the fused kernel
             student_head = unwrapped_student.get_output_embeddings()
             teacher_head = unwrapped_teacher.get_output_embeddings()
+            student_device = student_hidden.device
+            teacher_weight = teacher_head.weight.to(student_device)
+            teacher_bias = getattr(teacher_head, "bias", None)
+            if teacher_bias is not None:
+                teacher_bias = teacher_bias.to(student_device)
 
             # liger fused jsd loss
             loss = self.liger_jsd_loss(
                 student_input=student_hidden,
                 student_weight=student_head.weight,
                 teacher_input=teacher_hidden,
-                teacher_weight=teacher_head.weight,
+                teacher_weight=teacher_weight,
                 true_labels=true_labels,
                 student_bias=getattr(student_head, "bias", None),
-                teacher_bias=getattr(teacher_head, "bias", None),
+                teacher_bias=teacher_bias,
             )
 
             # Release hidden states after loss computation
@@ -379,7 +385,8 @@ class GKDTrainer(SFTTrainer):
             # slice the logits for the generated tokens using the inputs["prompts"] lengths
             prompt_lengths = inputs["prompts"].shape[1]
             shifted_student_logits = student_outputs.logits[:, prompt_lengths - 1 : -1, :]
-            shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :]
+            # move teacher logits to the student's device so the loss and its backward stay there
+            shifted_teacher_logits = teacher_outputs.logits[:, prompt_lengths - 1 : -1, :].to(shifted_student_logits.device)
             shifted_labels = inputs["labels"][:, prompt_lengths:]
 
             # compute loss

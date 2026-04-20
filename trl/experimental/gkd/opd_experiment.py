@@ -16,6 +16,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl.experimental.gkd import GKDConfig
 from trl.experimental.gkd.opd_trainer import OPDTrainer
 
+try:
+    from peft import LoraConfig
+    _PEFT_AVAILABLE = True
+except ImportError:
+    _PEFT_AVAILABLE = False
+
 
 # -----------------------
 # Config (edit or use env)
@@ -45,6 +51,13 @@ USE_CORRECTION = os.environ.get("USE_CORRECTION", "0") == "1"  # Algorithm 8 ζ 
 CORRECTION_ALPHA = float(os.environ.get("CORRECTION_ALPHA", "0.2"))
 CORRECTION_LR = float(os.environ.get("CORRECTION_LR", "1e-3"))
 
+# LoRA
+USE_LORA = os.environ.get("USE_LORA", "0") == "1"
+LORA_R = int(os.environ.get("LORA_R", "16"))
+LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
+LORA_DROPOUT = float(os.environ.get("LORA_DROPOUT", "0.05"))
+LORA_TARGET_MODULES = os.environ.get("LORA_TARGET_MODULES", "q_proj,k_proj,v_proj,o_proj").split(",")
+
 
 def _short_name(model_id: str) -> str:
     """Extract the repo name part from a HuggingFace model ID (e.g. 'meta-llama/Llama-3.1-8B-Instruct' -> 'Llama-3.1-8B-Instruct')."""
@@ -59,6 +72,7 @@ _default_output_dir = (
     f"_{OPD_MODE}"
     f"{'_tr' if TRUST_REGION else ''}"
     f"{'_corr' if USE_CORRECTION else ''}"
+    f"{'_lora' if USE_LORA else ''}"
     f"_L{NUM_INNER_STEPS}"
     f"_buf{REPLAY_BUFFER_SIZE}"
     f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -262,6 +276,7 @@ def main() -> None:
     print(f"TRUST_REGION={TRUST_REGION}  PPO_CLIP_EPS={PPO_CLIP_EPS}")
     print(f"NUM_INNER_STEPS={NUM_INNER_STEPS}  REPLAY_BUFFER_SIZE={REPLAY_BUFFER_SIZE}")
     print(f"USE_CORRECTION={USE_CORRECTION}  CORRECTION_ALPHA={CORRECTION_ALPHA}  CORRECTION_LR={CORRECTION_LR}")
+    print(f"USE_LORA={USE_LORA}" + (f"  r={LORA_R}  alpha={LORA_ALPHA}  dropout={LORA_DROPOUT}  targets={LORA_TARGET_MODULES}" if USE_LORA else ""))
 
     # Save run config so results are always self-describing
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -285,6 +300,11 @@ def main() -> None:
         "batch_size": PER_DEVICE_BATCH_SIZE,
         "grad_accum": GRAD_ACCUM,
         "output_dir": OUTPUT_DIR,
+        "use_lora": USE_LORA,
+        "lora_r": LORA_R if USE_LORA else None,
+        "lora_alpha": LORA_ALPHA if USE_LORA else None,
+        "lora_dropout": LORA_DROPOUT if USE_LORA else None,
+        "lora_target_modules": LORA_TARGET_MODULES if USE_LORA else None,
     }
     with open(os.path.join(OUTPUT_DIR, "run_config.json"), "w") as f:
         json.dump(run_config, f, indent=2)
@@ -343,6 +363,19 @@ def main() -> None:
     else:
         args.num_train_epochs = NUM_EPOCHS
 
+    peft_config = None
+    if USE_LORA:
+        if not _PEFT_AVAILABLE:
+            raise ImportError("USE_LORA=1 but peft is not installed. Run: pip install peft")
+        peft_config = LoraConfig(
+            r=LORA_R,
+            lora_alpha=LORA_ALPHA,
+            lora_dropout=LORA_DROPOUT,
+            target_modules=LORA_TARGET_MODULES,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
     trainer = OPDTrainer(
         model=model,
         teacher_model=teacher_model,
@@ -358,6 +391,7 @@ def main() -> None:
         use_correction=USE_CORRECTION,
         correction_alpha=CORRECTION_ALPHA,
         correction_lr=CORRECTION_LR,
+        peft_config=peft_config,
     )
 
     trainer.train()

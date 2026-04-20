@@ -15,6 +15,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from trl.experimental.gkd import GKDConfig, GKDTrainer
 
+try:
+    from peft import LoraConfig
+    _PEFT_AVAILABLE = True
+except ImportError:
+    _PEFT_AVAILABLE = False
+
 
 # -----------------------
 # Config (edit or use env)
@@ -37,6 +43,13 @@ NUM_EPOCHS = float(os.environ.get("NUM_EPOCHS", "1"))  # ignored if MAX_STEPS > 
 LR = float(os.environ.get("LR", "2e-6"))
 BETA = float(os.environ.get("BETA", "0.5"))
 
+# LoRA
+USE_LORA = os.environ.get("USE_LORA", "0") == "1"
+LORA_R = int(os.environ.get("LORA_R", "16"))
+LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
+LORA_DROPOUT = float(os.environ.get("LORA_DROPOUT", "0.05"))
+LORA_TARGET_MODULES = os.environ.get("LORA_TARGET_MODULES", "q_proj,k_proj,v_proj,o_proj").split(",")
+
 
 def _short_name(model_id: str) -> str:
     """Extract the repo name part from a HuggingFace model ID."""
@@ -47,6 +60,7 @@ _default_output_dir = (
     f"gkd_gsm8k"
     f"_S-{_short_name(STUDENT_MODEL)}"
     f"_T-{_short_name(TEACHER_MODEL)}"
+    f"{'_lora' if USE_LORA else ''}"
     f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
 )
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", _default_output_dir)
@@ -244,6 +258,7 @@ def main() -> None:
     print(f"TEACHER_MODEL={TEACHER_MODEL}")
     print(f"TRAIN_SAMPLES={TRAIN_SAMPLES} EVAL_SAMPLES={EVAL_SAMPLES}")
     print(f"OUTPUT_DIR={OUTPUT_DIR}")
+    print(f"USE_LORA={USE_LORA}" + (f"  r={LORA_R}  alpha={LORA_ALPHA}  dropout={LORA_DROPOUT}  targets={LORA_TARGET_MODULES}" if USE_LORA else ""))
 
     # Save run config so results are always self-describing
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -261,6 +276,11 @@ def main() -> None:
         "batch_size": PER_DEVICE_BATCH_SIZE,
         "grad_accum": GRAD_ACCUM,
         "output_dir": OUTPUT_DIR,
+        "use_lora": USE_LORA,
+        "lora_r": LORA_R if USE_LORA else None,
+        "lora_alpha": LORA_ALPHA if USE_LORA else None,
+        "lora_dropout": LORA_DROPOUT if USE_LORA else None,
+        "lora_target_modules": LORA_TARGET_MODULES if USE_LORA else None,
     }
     with open(os.path.join(OUTPUT_DIR, "run_config.json"), "w") as f:
         json.dump(run_config, f, indent=2)
@@ -320,6 +340,19 @@ def main() -> None:
     else:
         args.num_train_epochs = NUM_EPOCHS
 
+    peft_config = None
+    if USE_LORA:
+        if not _PEFT_AVAILABLE:
+            raise ImportError("USE_LORA=1 but peft is not installed. Run: pip install peft")
+        peft_config = LoraConfig(
+            r=LORA_R,
+            lora_alpha=LORA_ALPHA,
+            lora_dropout=LORA_DROPOUT,
+            target_modules=LORA_TARGET_MODULES,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
     trainer = GKDTrainer(
         model=model,
         teacher_model=teacher_model,
@@ -327,6 +360,7 @@ def main() -> None:
         processing_class=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        peft_config=peft_config,
     )
 
     trainer.train()
