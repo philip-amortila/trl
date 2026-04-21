@@ -195,12 +195,15 @@ class DataCollatorForChatML:
 
                 if self.max_length is not None and len(message_input_ids_full) > self.max_length:
                     completion_ids = completion_input_ids_full
-                    if len(completion_ids) >= self.max_length:
-                        completion_ids = completion_ids[-self.max_length :]
-                        prompt_ids = []
+                    # Always keep at least 1 prompt token so model.generate receives a non-empty input
+                    min_prompt_tokens = max(1, len(prompt_tokens_full) > 0)
+                    max_completion_tokens = self.max_length - min_prompt_tokens
+                    if len(completion_ids) >= max_completion_tokens:
+                        completion_ids = completion_ids[-max_completion_tokens:]
+                        prompt_ids = prompt_tokens_full[-min_prompt_tokens:]
                     else:
                         max_prompt_tokens = self.max_length - len(completion_ids)
-                        prompt_ids = prompt_tokens_full[-max_prompt_tokens:] if max_prompt_tokens > 0 else []
+                        prompt_ids = prompt_tokens_full[-max_prompt_tokens:]
                     message_input_ids = prompt_ids + completion_ids
                 else:
                     message_input_ids = message_input_ids_full
