@@ -2,15 +2,15 @@
 """
 Launch GKD vs OPD-expectation+TR comparison across 3 student sizes on MATH500.
 
-  opd_m_s05  GPU 0  →  opd expectation  trust_region=True  student=Qwen2-0.5B
-  opd_m_s15  GPU 1  →  opd expectation  trust_region=True  student=Qwen2-1.5B
-  opd_m_s3b  GPU 2  →  opd expectation  trust_region=True  student=Qwen2.5-3B
-  gkd_m_s05  GPU 3  →  gkd              student=Qwen2-0.5B
-  gkd_m_s15  GPU 4  →  gkd              student=Qwen2-1.5B
-  gkd_m_s3b  GPU 5  →  gkd              student=Qwen2.5-3B
+  opd_m_s05  GPU 1  →  opd expectation  trust_region=True  student=Qwen2-0.5B
+  opd_m_s15  GPU 2  →  opd expectation  trust_region=True  student=Qwen2-1.5B
+  opd_m_s3b  GPU 3  →  opd expectation  trust_region=True  student=Qwen2.5-3B
+  gkd_m_s05  GPU 4  →  gkd              student=Qwen2-0.5B
+  gkd_m_s15  GPU 5  →  gkd              student=Qwen2-1.5B
+  gkd_m_s3b  GPU 6  →  gkd              student=Qwen2.5-3B
 
 Teacher  : Qwen/Qwen2-7B-Instruct
-Train    : lighteval/MATH (train split)
+Train    : EleutherAI/hendrycks_math (train split)
 Eval     : HuggingFaceH4/MATH-500 (test split)
 """
 
