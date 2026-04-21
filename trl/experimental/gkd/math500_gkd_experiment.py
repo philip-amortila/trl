@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import matplotlib
+os.environ["HUGGING_FACE_HUB_TOKEN"] = "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"
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -28,7 +29,7 @@ STUDENT_MODEL = os.environ.get("STUDENT_MODEL", "Qwen/Qwen2-0.5B-Instruct")
 TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "Qwen/Qwen2-7B-Instruct")
 
 # Training data: full MATH train split; eval data: MATH-500 test split
-TRAIN_DATASET_NAME = os.environ.get("TRAIN_DATASET_NAME", "lighteval/MATH")
+TRAIN_DATASET_NAME = os.environ.get("TRAIN_DATASET_NAME", "EleutherAI/hendrycks_math")
 TRAIN_DATASET_CONFIG = os.environ.get("TRAIN_DATASET_CONFIG", "all")
 EVAL_DATASET_NAME = os.environ.get("EVAL_DATASET_NAME", "HuggingFaceH4/MATH-500")
 
@@ -61,6 +62,7 @@ _default_output_dir = (
     f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
 )
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", _default_output_dir)
+HUB_MODEL_ID = f"QpiEImitation/gkd_math500_S-{_short_name(STUDENT_MODEL)}_T-{_short_name(TEACHER_MODEL)}"
 
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", "100"))
@@ -96,9 +98,23 @@ def extract_boxed_answer(text: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+_HENDRYCKS_CONFIGS = [
+    "algebra", "counting_and_probability", "geometry",
+    "intermediate_algebra", "number_theory", "prealgebra", "precalculus",
+]
+
+
+def _load_train_dataset():
+    if TRAIN_DATASET_CONFIG == "all" and TRAIN_DATASET_NAME == "EleutherAI/hendrycks_math":
+        from datasets import concatenate_datasets
+        splits = [load_dataset(TRAIN_DATASET_NAME, cfg)["train"] for cfg in _HENDRYCKS_CONFIGS]
+        return concatenate_datasets(splits)
+    return load_dataset(TRAIN_DATASET_NAME, TRAIN_DATASET_CONFIG)["train"]
+
+
 def build_math_datasets(train_n: int, eval_n: int) -> Tuple[Dataset, Dataset]:
-    train_ds = load_dataset(TRAIN_DATASET_NAME, TRAIN_DATASET_CONFIG)
-    train = train_ds["train"].select(range(min(train_n, len(train_ds["train"]))))
+    train_split = _load_train_dataset()
+    train = train_split.select(range(min(train_n, len(train_split))))
     train_msgs = [math_to_messages(ex["problem"], ex["solution"]) for ex in train]
     train_dataset = Dataset.from_dict({"messages": train_msgs})
 
@@ -260,15 +276,17 @@ def main() -> None:
         gradient_accumulation_steps=GRAD_ACCUM,
         learning_rate=LR,
         logging_steps=LOGGING_STEPS,
-        eval_steps=EVAL_STEPS,
-        eval_strategy="steps",
-        save_strategy="no",
+        eval_strategy="no",
+        save_strategy="steps",
+        save_steps=200,
         do_train=True,
-        do_eval=True,
+        do_eval=False,
         report_to=["wandb"],
         bf16=torch.cuda.is_available(),
         lmbda=1.0,
         beta=BETA,
+        push_to_hub=True,
+        hub_model_id=HUB_MODEL_ID,
     )
 
     if MAX_STEPS > 0:

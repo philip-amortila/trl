@@ -3,7 +3,7 @@ set -e
 
 export WANDB_ENTITY=viano
 export TOKENIZERS_PARALLELISM=false
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=6
 
 cd ~/trl/trl/experimental/gkd
 

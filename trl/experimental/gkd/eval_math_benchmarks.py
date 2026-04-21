@@ -165,7 +165,13 @@ def eval_math500(model, tokenizer, max_new_tokens: int) -> dict:
     ds = load_dataset("lighteval/MATH-Hard", split="test")
     n = len(ds)
     correct = parsed = 0
+    by_category: dict[str, dict] = {}
+
     for i in range(n):
+        category = ds[i].get("type") or ds[i].get("subject") or "unknown"
+        cat = by_category.setdefault(category, {"correct": 0, "total": 0, "parsed": 0})
+        cat["total"] += 1
+
         gold_raw = ds[i].get("answer") or parse_math500(ds[i].get("solution", ""))
         if gold_raw is None:
             continue
@@ -177,12 +183,31 @@ def eval_math500(model, tokenizer, max_new_tokens: int) -> dict:
         pred = parse_math500(resp)
         if pred is not None:
             parsed += 1
+            cat["parsed"] += 1
         if pred is not None and math500_equiv(pred, gold):
             correct += 1
+            cat["correct"] += 1
         if (i + 1) % 100 == 0:
             print(f"  MATH500 [{i+1}/{n}]  acc={correct/(i+1):.3f}")
-    return {"n": n, "exact_match": correct / n, "parse_rate": parsed / n,
-            "correct": correct}
+
+    category_acc = {
+        cat: {
+            "correct": v["correct"],
+            "total":   v["total"],
+            "parsed":  v["parsed"],
+            "accuracy": v["correct"] / v["total"] if v["total"] > 0 else 0.0,
+            "parse_rate": v["parsed"] / v["total"] if v["total"] > 0 else 0.0,
+        }
+        for cat, v in sorted(by_category.items())
+    }
+
+    return {
+        "n": n,
+        "exact_match": correct / n,
+        "parse_rate":  parsed / n,
+        "correct":     correct,
+        "by_category": category_acc,
+    }
 
 
 def eval_svamp(model, tokenizer, max_new_tokens: int) -> dict:
@@ -256,7 +281,10 @@ def main():
         res = eval_math500(model, tokenizer, args.max_new_tokens)
         json.dump(res, open(os.path.join(out_dir, "eval_math500.json"), "w"), indent=2)
         print(f"  MATH500 acc={res['exact_match']:.4f}  ({res['correct']}/{res['n']})")
+        for cat, v in res.get("by_category", {}).items():
+            print(f"    {cat:<30}  {v['accuracy']:.3f}  ({v['correct']}/{v['total']})")
         summary["math500"] = res["exact_match"]
+        summary["math500_by_category"] = {c: v["accuracy"] for c, v in res.get("by_category", {}).items()}
 
     if "svamp" in args.benchmarks:
         print("\n── SVAMP ──")

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import matplotlib
+os.environ["HUGGING_FACE_HUB_TOKEN"] = "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"
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -78,6 +79,7 @@ _default_output_dir = (
     f"_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}"
 )
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", _default_output_dir)
+HUB_MODEL_ID = f"QpiEImitation/opd_gsm8k_S-{_short_name(STUDENT_MODEL)}_T-{_short_name(TEACHER_MODEL)}"
 
 LOGGING_STEPS = int(os.environ.get("LOGGING_STEPS", "10"))
 EVAL_STEPS = int(os.environ.get("EVAL_STEPS", "100"))
@@ -347,14 +349,16 @@ def main() -> None:
         gradient_accumulation_steps=GRAD_ACCUM,
         learning_rate=LR,
         logging_steps=LOGGING_STEPS,
-        eval_steps=EVAL_STEPS,
-        eval_strategy="steps",
-        save_strategy="no",
+        eval_strategy="no",
+        save_strategy="steps",
+        save_steps=200,
         do_train=True,
-        do_eval=True,
+        do_eval=False,
         report_to=["wandb"],
         bf16=torch.cuda.is_available(),
         lmbda=1.0,
+        push_to_hub=True,
+        hub_model_id=HUB_MODEL_ID,
     )
 
     # Choose max_steps vs epochs
