@@ -28,12 +28,16 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 _ANS_RE = re.compile(r"####\s*([\-]?\d[\d,\.]*)")
 _ANS_RE_BOXED = re.compile(r"\\boxed\{([\-]?\d[\d,\.]*)\}")
 _ANS_RE_DOLLAR = re.compile(r"\$\s*([\-]?\d[\d,\.]*)\s*\$")
+_ANS_RE_FINAL = re.compile(r"[Tt]he\s+final\s+answer\s*:\s*\$?\s*([\-]?\d[\d,]*(?:\.\d+)?)")
 
 def extract_final_answer(text: str, flexible: bool = False) -> Optional[str]:
     m = _ANS_RE.search(text)
     if m:
         return m.group(1).strip().replace(",", "")
     if flexible:
+        m = _ANS_RE_FINAL.search(text)
+        if m:
+            return m.group(1).replace(",", "")
         m = _ANS_RE_BOXED.search(text)
         if m:
             return m.group(1).strip().replace(",", "")

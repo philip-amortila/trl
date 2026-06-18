@@ -76,24 +76,24 @@ def resolve_jobs() -> list[tuple[str, int, Path, Path, str]]:
     jobs = []
 
     gsm8k_specs = [
-        ("eval_gkd_gsm8k_05B",  0, f"gkd_gsm8k_S-Qwen2-0.5B-Instruct_{TEACHER}_*"),
-        ("eval_opd_gsm8k_05B",  0, f"opd_gsm8k_S-Qwen2-0.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
-        ("eval_gkd_gsm8k_15B",  4, f"gkd_gsm8k_S-Qwen2-1.5B-Instruct_{TEACHER}_*"),
-        ("eval_opd_gsm8k_15B",  4, f"opd_gsm8k_S-Qwen2-1.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
-        ("eval_gkd_gsm8k_3B",   6, f"gkd_gsm8k_S-Qwen2.5-3B-Instruct_{TEACHER}_*"),
-        ("eval_opd_gsm8k_3B",   6, f"opd_gsm8k_S-Qwen2.5-3B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
+        ("eval_gkd_gsm8k_05B",  2, f"gkd_gsm8k_S-Qwen2-0.5B-Instruct_{TEACHER}_*"),
+        ("eval_opd_gsm8k_05B",  2, f"opd_gsm8k_S-Qwen2-0.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
+        ("eval_gkd_gsm8k_15B",  5, f"gkd_gsm8k_S-Qwen2-1.5B-Instruct_{TEACHER}_*"),
+        ("eval_opd_gsm8k_15B",  5, f"opd_gsm8k_S-Qwen2-1.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
+        ("eval_gkd_gsm8k_3B",   7, f"gkd_gsm8k_S-Qwen2.5-3B-Instruct_{TEACHER}_*"),
+        ("eval_opd_gsm8k_3B",   7, f"opd_gsm8k_S-Qwen2.5-3B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
     ]
     for session, gpu, pattern in gsm8k_specs:
         model_dir = find_latest(pattern)
         jobs.append((session, gpu, model_dir, EVAL_GSM8K, ""))
 
     math500_specs = [
-        ("eval_gkd_math500_05B", 6, f"gkd_math500_S-Qwen2-0.5B-Instruct_{TEACHER}_*"),
-        ("eval_opd_math500_05B", 6, f"opd_math500_S-Qwen2-0.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
-        ("eval_gkd_math500_15B", 4, f"gkd_math500_S-Qwen2-1.5B-Instruct_{TEACHER}_*"),
-        ("eval_opd_math500_15B", 4, f"opd_math500_S-Qwen2-1.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
-        ("eval_gkd_math500_3B",  0, f"gkd_math500_S-Qwen2.5-3B-Instruct_{TEACHER}_*"),
-        ("eval_opd_math500_3B",  0, f"opd_math500_S-Qwen2.5-3B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
+        ("eval_gkd_math500_05B", 7, f"gkd_math500_S-Qwen2-0.5B-Instruct_{TEACHER}_*"),
+        ("eval_opd_math500_05B", 7, f"opd_math500_S-Qwen2-0.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
+        ("eval_gkd_math500_15B", 5, f"gkd_math500_S-Qwen2-1.5B-Instruct_{TEACHER}_*"),
+        ("eval_opd_math500_15B", 5, f"opd_math500_S-Qwen2-1.5B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
+        ("eval_gkd_math500_3B",  2, f"gkd_math500_S-Qwen2.5-3B-Instruct_{TEACHER}_*"),
+        ("eval_opd_math500_3B",  2, f"opd_math500_S-Qwen2.5-3B-Instruct_{TEACHER}_expectation_tr_L*_buf*"),
     ]
     for session, gpu, pattern in math500_specs:
         model_dir = find_latest(pattern)
