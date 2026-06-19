@@ -1,0 +1,7 @@
+=== Job info ===
+SLURM_JOB_ID        : 2567801
+SLURM_JOB_NODELIST  : nid006068
+CUDA_VISIBLE_DEVICES: 0,1,2,3
+Student             : Qwen/Qwen3.5-4B
+Teacher             : Qwen/Qwen3.5-9B
+================
