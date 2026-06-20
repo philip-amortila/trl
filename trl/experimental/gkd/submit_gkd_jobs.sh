@@ -17,14 +17,15 @@
 #   MEM         Host memory per job        (default: 120G)
 #   TIME        Wall-clock time limit      (default: 12:00:00)
 #   OUTPUT_DIR  Root dir for all outputs   (default: gkd_qwen35_experiments)
-#   VENV        Path to virtualenv/conda   (optional, e.g. /path/to/env)
+#   CONDA_ENV   Conda environment to activate (default: ovi)
 #
 # Training knobs forwarded to run_gkd_qwen35.py:
 #   TEACHER_MODEL  MAX_STEPS  SAVE_STEPS  BATCH_SIZE  GRAD_ACCUM  LR  BETA
 #
 # Usage:
-#   ACCOUNT=g123 bash submit_gkd_jobs.sh
-#   ACCOUNT=g123 PARTITION=debug TIME=01:00:00 bash submit_gkd_jobs.sh
+#   bash submit_gkd_jobs.sh
+#   PARTITION=debug TIME=01:00:00 bash submit_gkd_jobs.sh
+#   CONDA_ENV=other_env bash submit_gkd_jobs.sh
 
 set -euo pipefail
 
@@ -38,6 +39,7 @@ if [[ -z "${ACCOUNT}" ]]; then
     exit 1
 fi
 
+CONDA_ENV="${CONDA_ENV:-ovi}"
 PARTITION="${PARTITION:-normal}"
 CPUS="${CPUS:-72}"          # GH200 node has ~72 Grace CPU cores
 MEM="${MEM:-120G}"          # node total is ~450 GB; leave room for the OS and other jobs
@@ -74,6 +76,7 @@ STUDENTS=(
 echo "Submitting ${#STUDENTS[@]} GKD jobs on Clariden"
 echo "  Account    : ${ACCOUNT}"
 echo "  Partition  : ${PARTITION}  TIME=${TIME}"
+echo "  Conda env  : ${CONDA_ENV}"
 echo "  Per job    : 1 node, 1 task, 1 GH200 GPU, ${CPUS} CPUs, ${MEM} RAM"
 echo "  Teacher    : ${TEACHER_MODEL}"
 echo "  Max steps  : ${MAX_STEPS}  (checkpoint every ${SAVE_STEPS})"
@@ -99,8 +102,9 @@ for STUDENT in "${STUDENTS[@]}"; do
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ---- activate environment (if VENV is set) ----
-${VENV:+source "${VENV}/bin/activate"}
+# ---- activate conda environment ----
+source "\$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "${CONDA_ENV}"
 
 # ---- forward experiment settings ----
 export STUDENT_MODEL="${STUDENT}"
@@ -113,9 +117,9 @@ export GRAD_ACCUM="${GRAD_ACCUM}"
 export LR="${LR}"
 export BETA="${BETA}"
 
-# ---- forward HF token if present ----
-${HUGGING_FACE_HUB_TOKEN:+export HUGGING_FACE_HUB_TOKEN="${HUGGING_FACE_HUB_TOKEN}"}
-${HF_TOKEN:+export HF_TOKEN="${HF_TOKEN}"}
+# ---- HF token ----
+export HUGGING_FACE_HUB_TOKEN="<YOUR_HF_TOKEN>"
+export HF_TOKEN="<YOUR_HF_TOKEN>"
 
 echo "=== Job info ==="
 echo "SLURM_JOB_ID        : \${SLURM_JOB_ID}"
@@ -126,7 +130,7 @@ echo "Teacher             : ${TEACHER_MODEL}"
 echo "================"
 
 cd "${SCRIPT_DIR}"
-python run_gkd_qwen35.py
+srun python run_gkd_qwen35.py
 JOB_SCRIPT
     )
 

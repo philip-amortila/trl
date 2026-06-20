@@ -29,7 +29,7 @@ except ImportError:
 STUDENT_MODEL = os.environ.get("STUDENT_MODEL", "Qwen/Qwen2-0.5B-Instruct")
 TEACHER_MODEL = os.environ.get("TEACHER_MODEL", "Qwen/Qwen2-1.5B-Instruct")
 
-DATASET_NAME = os.environ.get("DATASET_NAME", "gsm8k")
+DATASET_NAME = os.environ.get("DATASET_NAME", "openai/gsm8k")
 DATASET_CONFIG = os.environ.get("DATASET_CONFIG", "main")
 
 # Keep small for sanity checks; increase later.
